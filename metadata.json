@@ -1,0 +1,6 @@
+{
+  "name": "Billing Hours Tracker",
+  "description": "A clean, responsive billing and utilization tracker for engineers and consultants with LocalStorage persistence and GitHub Pages deployment support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
