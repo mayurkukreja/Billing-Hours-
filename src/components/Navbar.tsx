@@ -5,13 +5,17 @@ import {
   Calendar,
   Compass,
   FileSpreadsheet,
+  FileText,
+  Flame,
   Layers,
   LayoutDashboard,
   Menu,
   Moon,
   Plus,
   Settings,
+  Sparkles,
   Sun,
+  TrendingUp,
   User,
   X,
 } from 'lucide-react';
@@ -42,10 +46,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   const navItems: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
     { id: 'entries', label: 'Daily Entries', icon: <Layers className="w-4 h-4" /> },
+    { id: 'heatmap', label: 'Heatmap Matrix', icon: <Flame className="w-4 h-4" /> },
+    { id: 'analytics', label: 'Work Insights & Prediction', icon: <Sparkles className="w-4 h-4" /> },
     { id: 'weekly', label: 'Weekly', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'monthly', label: 'Monthly', icon: <Calendar className="w-4 h-4" /> },
+    { id: 'reports', label: 'Timesheet Invoice', icon: <FileText className="w-4 h-4" /> },
     { id: 'settings', label: 'Settings', icon: <Settings className="w-4 h-4" /> },
   ];
+
 
   const handleTabClick = (tab: ActiveTab) => {
     onTabChange(tab);

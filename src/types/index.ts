@@ -2,9 +2,11 @@ export type ProductivityRating = 'Low' | 'Moderate' | 'Good' | 'Excellent';
 
 export type WorkingDaysPreset = 'mon-fri' | 'mon-sat' | 'custom';
 
-export type ActiveTab = 'dashboard' | 'entries' | 'weekly' | 'monthly' | 'settings';
+export type ActiveTab = 'dashboard' | 'entries' | 'heatmap' | 'analytics' | 'weekly' | 'monthly' | 'reports' | 'settings';
 
 export type TimeFormat = 'HH:MM' | 'decimal';
+
+export type EntryStatus = 'draft' | 'submitted' | 'approved' | 'invoiced';
 
 export interface Employee {
   id: string;
@@ -12,6 +14,7 @@ export interface Employee {
   email?: string;
   role?: string;
   isDefault?: boolean;
+  defaultHourlyRate?: number; // e.g. $125/hr
 }
 
 export interface Project {
@@ -21,6 +24,8 @@ export interface Project {
   client?: string;
   color?: string; // e.g. blue, indigo, emerald, amber, purple
   isActive: boolean;
+  hourlyRate?: number; // e.g. $150/hr billable rate
+  budgetHours?: number; // e.g. 500 hours
 }
 
 export interface Holiday {
@@ -42,9 +47,22 @@ export interface BillingEntry {
   upskillingMinutes: number;
   leaveMinutes: number;
   remarks: string;
+  taskCategory?: string; // e.g. 'STC Certification', 'FAA Compliance', 'CAD Engineering', 'Client Review', 'Admin'
+  status?: EntryStatus; // 'draft' | 'submitted' | 'approved' | 'invoiced'
+  hourlyRate?: number; // Cached rate at time of billing
   overtimeAcknowledged?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ActiveTimer {
+  isRunning: boolean;
+  startTime: number | null; // timestamp
+  elapsedSeconds: number;
+  employeeId: string;
+  projectId: string;
+  category: 'billable' | 'non-billable' | 'upskilling';
+  remarks: string;
 }
 
 export interface AppSettings {
@@ -53,8 +71,11 @@ export interface AppSettings {
   workingDaysPreset: WorkingDaysPreset;
   customWorkingDays: number[]; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
   currency: string;
+  defaultHourlyRate: number;
   timeInputFormat: TimeFormat;
   theme: 'light' | 'dark' | 'system';
+  enableLiveTimer: boolean;
+  enableAuditAlerts: boolean;
 }
 
 export interface FilterState {
@@ -63,6 +84,7 @@ export interface FilterState {
   dateTo: string;
   projectId: string;
   employeeId: string;
+  status?: string;
   billingType: 'all' | 'billable' | 'non-billable' | 'upskilling' | 'leave';
   sortBy: 'date-desc' | 'date-asc' | 'hours-desc' | 'hours-asc' | 'utilization-desc';
 }
@@ -82,4 +104,6 @@ export interface DaySummary {
   totalWorkingMinutes: number;
   utilizationPercent: number;
   entriesCount: number;
+  estimatedRevenue?: number;
 }
+

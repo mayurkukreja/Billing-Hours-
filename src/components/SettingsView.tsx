@@ -35,8 +35,11 @@ interface SettingsViewProps {
   onDeleteHoliday: (holidayId: string) => void;
   onExportJSON: () => void;
   onExportCSV: () => void;
+  onExportExcel?: () => void;
+  onOpenImportModal?: () => void;
   onImportJSON: (file: File) => void;
   onResetToDemoData: () => void;
+  onClearDefaultData?: () => void;
   onClearAllData: () => void;
 }
 
@@ -56,8 +59,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDeleteHoliday,
   onExportJSON,
   onExportCSV,
+  onExportExcel,
+  onOpenImportModal,
   onImportJSON,
   onResetToDemoData,
+  onClearDefaultData,
   onClearAllData,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -520,7 +526,61 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* Export Excel (.xlsx) with Heatmap */}
+          {onExportExcel && (
+            <button
+              id="export-excel-settings-btn"
+              type="button"
+              onClick={onExportExcel}
+              className="p-4 bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-xl hover:border-emerald-500 transition-colors text-left group"
+            >
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600 dark:text-emerald-400 mb-2 group-hover:scale-110 transition-transform" />
+              <div className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                Download Excel (.xlsx)
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Multi-sheet workbook with activity heatmap matrix & KPIs
+              </div>
+            </button>
+          )}
+
+          {/* Import Excel / CSV */}
+          {onOpenImportModal && (
+            <button
+              id="import-excel-settings-btn"
+              type="button"
+              onClick={onOpenImportModal}
+              className="p-4 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200 dark:border-indigo-800 rounded-xl hover:border-indigo-500 transition-colors text-left group"
+            >
+              <Upload className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
+              <div className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                Import Excel / CSV
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Upload spreadsheets and auto-generate heatmaps
+              </div>
+            </button>
+          )}
+
+          {/* Clear Default Details */}
+          {onClearDefaultData && (
+            <button
+              id="clear-defaults-settings-btn"
+              type="button"
+              onClick={onClearDefaultData}
+              className="p-4 bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-800 rounded-xl hover:border-rose-500 transition-colors text-left group"
+            >
+              <Trash2 className="w-5 h-5 text-rose-600 dark:text-rose-400 mb-2 group-hover:scale-110 transition-transform" />
+              <div className="font-bold text-xs text-slate-900 dark:text-slate-100">
+                Clear Default Details
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5">
+                Wipe demo/sample records to start clean with your own files
+              </div>
+            </button>
+          )}
+
           {/* Export JSON */}
           <button
             id="export-json-btn"
@@ -549,34 +609,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               Export CSV Report
             </div>
             <div className="text-[11px] text-slate-500 mt-0.5">
-              Detailed spreadsheet for Excel / Sheets
+              Detailed spreadsheet for raw CSV usage
             </div>
           </button>
-
-          {/* Import JSON */}
-          <div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            <button
-              id="import-json-btn"
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full p-4 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-xl hover:border-indigo-500 dark:hover:border-indigo-400 transition-colors text-left group"
-            >
-              <Upload className="w-5 h-5 text-indigo-600 dark:text-indigo-400 mb-2 group-hover:scale-110 transition-transform" />
-              <div className="font-bold text-xs text-slate-900 dark:text-slate-100">
-                Import JSON Data
-              </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">
-                Restore previously exported JSON file
-              </div>
-            </button>
-          </div>
 
           {/* Load Sample Demo Data */}
           <button

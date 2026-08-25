@@ -16,6 +16,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     email: 'mayurkukreja4321@gmail.com',
     role: 'Aerospace Certification Engineer',
     isDefault: true,
+    defaultHourlyRate: 150,
   },
   {
     id: 'emp-sarah',
@@ -23,6 +24,7 @@ export const DEFAULT_EMPLOYEES: Employee[] = [
     email: 'sarah.chen@aerotech.io',
     role: 'Structures Specialist',
     isDefault: false,
+    defaultHourlyRate: 135,
   },
 ];
 
@@ -34,6 +36,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'Skyline Aerospace',
     color: '#0284c7', // Sky blue
     isActive: true,
+    hourlyRate: 160,
+    budgetHours: 400,
   },
   {
     id: 'proj-ci',
@@ -42,6 +46,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'AeroLux Interiors',
     color: '#4f46e5', // Indigo
     isActive: true,
+    hourlyRate: 145,
+    budgetHours: 250,
   },
   {
     id: 'proj-fl',
@@ -50,6 +56,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'Part 25 Compliance Lab',
     color: '#e11d48', // Rose
     isActive: true,
+    hourlyRate: 175,
+    budgetHours: 180,
   },
   {
     id: 'proj-hc',
@@ -58,6 +66,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'RotorCraft Systems',
     color: '#0d9488', // Teal
     isActive: true,
+    hourlyRate: 155,
+    budgetHours: 320,
   },
   {
     id: 'proj-tr',
@@ -66,6 +76,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'Internal',
     color: '#d97706', // Amber
     isActive: true,
+    hourlyRate: 90,
+    budgetHours: 80,
   },
   {
     id: 'proj-ip',
@@ -74,6 +86,8 @@ export const DEFAULT_PROJECTS: Project[] = [
     client: 'Aero Engineering',
     color: '#059669', // Emerald
     isActive: true,
+    hourlyRate: 100,
+    budgetHours: 150,
   },
 ];
 
@@ -92,8 +106,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   workingDaysPreset: 'mon-fri',
   customWorkingDays: [1, 2, 3, 4, 5],
   currency: 'USD',
+  defaultHourlyRate: 150,
   timeInputFormat: 'HH:MM',
   theme: 'light',
+  enableLiveTimer: true,
+  enableAuditAlerts: true,
 };
 
 export const SAMPLE_AEROSPACE_ENTRIES: BillingEntry[] = [

@@ -15,15 +15,22 @@ import {
   saveSettings,
 } from './utils/storage';
 import { exportToCSV, exportToJSON, parseImportJSON } from './utils/exportHelpers';
+import { exportToExcel } from './utils/excelHelpers';
 import { calculateMonthWorkingDays } from './utils/workingDays';
 import { getTodayDateString, minutesToHHMM } from './utils/timeCalculations';
 
 import { Navbar } from './components/Navbar';
 import { DashboardCards } from './components/DashboardCards';
 import { DailyEntriesTable } from './components/DailyEntriesTable';
+import { ActivityHeatmap } from './components/ActivityHeatmap';
 import { WeeklySummary } from './components/WeeklySummary';
 import { MonthlySummary } from './components/MonthlySummary';
 import { SettingsView } from './components/SettingsView';
+import { AnalyticsView } from './components/AnalyticsView';
+import { TimesheetReportView } from './components/TimesheetReportView';
+import { LiveTaskTimer } from './components/LiveTaskTimer';
+import { BatchEntryModal } from './components/BatchEntryModal';
+import { ExcelImportModal } from './components/ExcelImportModal';
 
 import { DailyEntryModal } from './components/DailyEntryModal';
 import { ProjectModal } from './components/ProjectModal';
@@ -44,7 +51,7 @@ export default function App() {
   // Active View Tab (with URL Hash sync for 100% static GitHub Pages support)
   const getInitialTab = (): ActiveTab => {
     const hash = window.location.hash.replace('#', '') as ActiveTab;
-    if (['dashboard', 'entries', 'weekly', 'monthly', 'settings'].includes(hash)) {
+    if (['dashboard', 'entries', 'heatmap', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
       return hash;
     }
     return 'dashboard';
@@ -57,6 +64,9 @@ export default function App() {
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
   const [entryToEdit, setEntryToEdit] = useState<BillingEntry | null>(null);
   const [prefillDate, setPrefillDate] = useState<string | undefined>(undefined);
+
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
 
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
   const [projectToEdit, setProjectToEdit] = useState<Project | null>(null);
@@ -99,7 +109,7 @@ export default function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '') as ActiveTab;
-      if (['dashboard', 'entries', 'weekly', 'monthly', 'settings'].includes(hash)) {
+      if (['dashboard', 'entries', 'heatmap', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -195,6 +205,50 @@ export default function App() {
       setEntries((prev) => [newEntry, ...prev]);
       showToast('Daily billing entry logged');
     }
+  };
+
+  // Save Batch Entries
+  const handleSaveBatchEntries = (
+    newBatch: Omit<BillingEntry, 'id' | 'createdAt' | 'updatedAt'>[],
+    overwriteExisting: boolean
+  ) => {
+    const nowISO = new Date().toISOString();
+    const batchDates = new Set(newBatch.map((b) => `${b.date}_${b.employeeId}`));
+
+    const formattedBatch: BillingEntry[] = newBatch.map((item, idx) => ({
+      ...item,
+      id: `entry-batch-${Date.now()}-${idx}`,
+      createdAt: nowISO,
+      updatedAt: nowISO,
+    }));
+
+    setEntries((prev) => {
+      let filtered = prev;
+      if (overwriteExisting) {
+        filtered = prev.filter((e) => !batchDates.has(`${e.date}_${e.employeeId}`));
+      }
+      return [...formattedBatch, ...filtered];
+    });
+
+    showToast(`Successfully logged ${formattedBatch.length} batch entries`);
+  };
+
+  // Bulk status update
+  const handleBulkUpdateStatus = (
+    entryIds: string[],
+    status: 'draft' | 'submitted' | 'approved' | 'invoiced'
+  ) => {
+    const nowISO = new Date().toISOString();
+    setEntries((prev) =>
+      prev.map((e) => (entryIds.includes(e.id) ? { ...e, status, updatedAt: nowISO } : e))
+    );
+    showToast(`Updated status to ${status.toUpperCase()} for ${entryIds.length} entries`);
+  };
+
+  // Bulk delete
+  const handleBulkDelete = (entryIds: string[]) => {
+    setEntries((prev) => prev.filter((e) => !entryIds.includes(e.id)));
+    showToast(`Deleted ${entryIds.length} entries`);
   };
 
   // Duplicate entry
@@ -328,6 +382,95 @@ export default function App() {
     showToast('CSV report downloaded');
   };
 
+  // Export Multi-Sheet Excel Workbook (.xlsx) with Heatmap and Summary
+  const handleExportExcel = () => {
+    exportToExcel(employeeFilteredEntries, employees, projects, holidays, settings);
+    showToast('Excel workbook with Heatmap exported');
+  };
+
+  // Handle Confirmed Excel / CSV Import
+  const handleConfirmExcelImport = (
+    importedEntries: BillingEntry[],
+    clearExistingFirst: boolean
+  ) => {
+    // 1. Auto-discover and register missing employees from imported data
+    const existingEmpNames = new Set(employees.map((e) => e.name.trim().toLowerCase()));
+    const newEmployeesToAdd: Employee[] = [];
+
+    importedEntries.forEach((entry) => {
+      const empName = entry.employeeName?.trim();
+      if (empName && !existingEmpNames.has(empName.toLowerCase())) {
+        existingEmpNames.add(empName.toLowerCase());
+        const newEmp: Employee = {
+          id: entry.employeeId || `emp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          name: empName,
+          role: 'Consultant Engineer',
+          isDefault: false,
+        };
+        newEmployeesToAdd.push(newEmp);
+      }
+    });
+
+    if (newEmployeesToAdd.length > 0) {
+      setEmployees((prev) => [...prev, ...newEmployeesToAdd]);
+    }
+
+    // 2. Auto-discover and register missing projects from imported data
+    const existingProjNames = new Set(projects.map((p) => p.name.trim().toLowerCase()));
+    const newProjectsToAdd: Project[] = [];
+    const colorPalette = ['#0284c7', '#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a', '#0d9488'];
+
+    importedEntries.forEach((entry) => {
+      const projName = entry.projectName?.trim();
+      if (projName && !existingProjNames.has(projName.toLowerCase())) {
+        existingProjNames.add(projName.toLowerCase());
+        const newProj: Project = {
+          id: entry.projectId || `proj-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          name: projName,
+          code: projName.slice(0, 4).toUpperCase(),
+          client: 'Client Project',
+          color: colorPalette[newProjectsToAdd.length % colorPalette.length],
+          isActive: true,
+          hourlyRate: 150,
+        };
+        newProjectsToAdd.push(newProj);
+      }
+    });
+
+    if (newProjectsToAdd.length > 0) {
+      setProjects((prev) => [...prev, ...newProjectsToAdd]);
+    }
+
+    // 3. Update entries list
+    if (clearExistingFirst) {
+      setEntries(importedEntries);
+    } else {
+      setEntries((prev) => [...importedEntries, ...prev]);
+    }
+
+    setIsExcelImportModalOpen(false);
+    showToast(`Successfully imported ${importedEntries.length} entries`);
+
+    // Switch to Heatmap tab so user immediately sees their imported data visual matrix
+    handleTabChange('heatmap');
+  };
+
+  // Clear Default / Sample Details so user starts with a completely clean slate
+  const handleClearDefaultData = () => {
+    setConfirmModalConfig({
+      isOpen: true,
+      title: 'Clear Default Details & Demo Entries',
+      message:
+        'This will clear all default demo billing entries and start with a clean slate ready for your own Excel imports and logs. Project and Employee templates will be preserved. Proceed?',
+      variant: 'danger',
+      onConfirm: () => {
+        setEntries([]);
+        setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
+        showToast('All default entries cleared. Ready for your data!');
+      },
+    });
+  };
+
   // Import JSON
   const handleImportJSON = (file: File) => {
     const reader = new FileReader();
@@ -442,13 +585,19 @@ export default function App() {
               entries={employeeFilteredEntries}
               employees={employees}
               projects={projects}
+              currency={settings.currency}
               onAddNewEntry={handleQuickAddToday}
+              onOpenBatchModal={() => setIsBatchModalOpen(true)}
+              onOpenImportModal={() => setIsExcelImportModalOpen(true)}
+              onExportExcel={handleExportExcel}
               onEditEntry={(entry) => {
                 setEntryToEdit(entry);
                 setIsEntryModalOpen(true);
               }}
               onDeleteEntry={handleDeleteEntry}
               onDuplicateEntry={handleDuplicateEntry}
+              onBulkDelete={handleBulkDelete}
+              onBulkUpdateStatus={handleBulkUpdateStatus}
               onExportCSV={handleExportCSV}
             />
           </div>
@@ -461,19 +610,70 @@ export default function App() {
               entries={employeeFilteredEntries}
               employees={employees}
               projects={projects}
+              currency={settings.currency}
               onAddNewEntry={handleQuickAddToday}
+              onOpenBatchModal={() => setIsBatchModalOpen(true)}
+              onOpenImportModal={() => setIsExcelImportModalOpen(true)}
+              onExportExcel={handleExportExcel}
               onEditEntry={(entry) => {
                 setEntryToEdit(entry);
                 setIsEntryModalOpen(true);
               }}
               onDeleteEntry={handleDeleteEntry}
               onDuplicateEntry={handleDuplicateEntry}
+              onBulkDelete={handleBulkDelete}
+              onBulkUpdateStatus={handleBulkUpdateStatus}
               onExportCSV={handleExportCSV}
             />
           </div>
         )}
 
-        {/* Tab 3: Weekly Summary */}
+        {/* Tab 2.5: Interactive Activity & Utilization Heatmap */}
+        {activeTab === 'heatmap' && (
+          <div className="animate-in fade-in duration-200">
+            <ActivityHeatmap
+              entries={employeeFilteredEntries}
+              settings={settings}
+              holidays={holidays}
+              projects={projects}
+              employees={employees}
+              onOpenDailyEntryModal={(date) => {
+                setPrefillDate(date);
+                setEntryToEdit(null);
+                setIsEntryModalOpen(true);
+              }}
+              onExportExcel={handleExportExcel}
+              onOpenImportModal={() => setIsExcelImportModalOpen(true)}
+              onClearDefaultData={handleClearDefaultData}
+            />
+          </div>
+        )}
+
+        {/* Tab 3: Advanced Analytics & Revenue View */}
+        {activeTab === 'analytics' && (
+          <div className="animate-in fade-in duration-200">
+            <AnalyticsView
+              entries={employeeFilteredEntries}
+              projects={projects}
+              employees={employees}
+              settings={settings}
+              holidays={holidays}
+              activeEmployeeFilter={activeEmployeeFilter}
+              onOpenDailyEntryModal={(prefill) => {
+                setPrefillDate(prefill);
+                setEntryToEdit(null);
+                setIsEntryModalOpen(true);
+              }}
+              onEditEntry={(entry) => {
+                setEntryToEdit(entry);
+                setIsEntryModalOpen(true);
+              }}
+            />
+          </div>
+        )}
+
+
+        {/* Tab 4: Weekly Summary */}
         {activeTab === 'weekly' && (
           <div className="animate-in fade-in duration-200">
             <WeeklySummary
@@ -485,7 +685,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 4: Monthly Summary */}
+        {/* Tab 5: Monthly Summary */}
         {activeTab === 'monthly' && (
           <div className="animate-in fade-in duration-200">
             <MonthlySummary
@@ -497,7 +697,20 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 5: Settings */}
+        {/* Tab 6: Formal Timesheet & Invoice Report */}
+        {activeTab === 'reports' && (
+          <div className="animate-in fade-in duration-200">
+            <TimesheetReportView
+              entries={employeeFilteredEntries}
+              employees={employees}
+              projects={projects}
+              settings={settings}
+              activeEmployeeFilter={activeEmployeeFilter}
+            />
+          </div>
+        )}
+
+        {/* Tab 7: Settings */}
         {activeTab === 'settings' && (
           <div className="animate-in fade-in duration-200">
             <SettingsView
@@ -523,13 +736,25 @@ export default function App() {
               onDeleteHoliday={handleDeleteHoliday}
               onExportJSON={handleExportJSON}
               onExportCSV={handleExportCSV}
+              onExportExcel={handleExportExcel}
+              onOpenImportModal={() => setIsExcelImportModalOpen(true)}
               onImportJSON={handleImportJSON}
               onResetToDemoData={handleResetToDemoData}
+              onClearDefaultData={handleClearDefaultData}
               onClearAllData={handleClearAllData}
             />
           </div>
         )}
       </main>
+
+      {/* Floating Persistent Live Task Timer Widget */}
+      <LiveTaskTimer
+        projects={projects}
+        employees={employees}
+        onSaveEntry={(newEntryData) => {
+          handleSaveEntry(newEntryData);
+        }}
+      />
 
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-200 dark:border-slate-800/80 bg-white dark:bg-slate-900 py-6 text-xs text-slate-500 dark:text-slate-400">
@@ -579,6 +804,26 @@ export default function App() {
           setEmployeeToEdit(null);
           setIsEmployeeModalOpen(true);
         }}
+      />
+
+      <BatchEntryModal
+        isOpen={isBatchModalOpen}
+        onClose={() => setIsBatchModalOpen(false)}
+        onSaveBatch={handleSaveBatchEntries}
+        employees={employees}
+        projects={projects}
+        holidays={holidays}
+        settings={settings}
+        activeEmployeeFilter={activeEmployeeFilter}
+      />
+
+      <ExcelImportModal
+        isOpen={isExcelImportModalOpen}
+        onClose={() => setIsExcelImportModalOpen(false)}
+        onConfirmImport={handleConfirmExcelImport}
+        existingEmployees={employees}
+        existingProjects={projects}
+        hasExistingEntries={entries.length > 0}
       />
 
       <ProjectModal
