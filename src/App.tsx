@@ -59,6 +59,17 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(getInitialTab);
   const [activeEmployeeFilter, setActiveEmployeeFilter] = useState<string>('all');
+  const [focusedMatrixDate, setFocusedMatrixDate] = useState<string | null>(null);
+
+  const handleNavigateToEntries = (date: string) => {
+    setFocusedMatrixDate(date);
+    handleTabChange('entries');
+  };
+
+  const handleNavigateToHeatmap = (date?: string) => {
+    if (date) setFocusedMatrixDate(date);
+    handleTabChange('heatmap');
+  };
 
   // Modal States
   const [isEntryModalOpen, setIsEntryModalOpen] = useState(false);
@@ -585,11 +596,14 @@ export default function App() {
               entries={employeeFilteredEntries}
               employees={employees}
               projects={projects}
+              holidays={holidays}
               currency={settings.currency}
+              focusedDate={focusedMatrixDate}
               onAddNewEntry={handleQuickAddToday}
               onOpenBatchModal={() => setIsBatchModalOpen(true)}
               onOpenImportModal={() => setIsExcelImportModalOpen(true)}
               onExportExcel={handleExportExcel}
+              onNavigateToHeatmap={handleNavigateToHeatmap}
               onEditEntry={(entry) => {
                 setEntryToEdit(entry);
                 setIsEntryModalOpen(true);
@@ -610,11 +624,14 @@ export default function App() {
               entries={employeeFilteredEntries}
               employees={employees}
               projects={projects}
+              holidays={holidays}
               currency={settings.currency}
+              focusedDate={focusedMatrixDate}
               onAddNewEntry={handleQuickAddToday}
               onOpenBatchModal={() => setIsBatchModalOpen(true)}
               onOpenImportModal={() => setIsExcelImportModalOpen(true)}
               onExportExcel={handleExportExcel}
+              onNavigateToHeatmap={handleNavigateToHeatmap}
               onEditEntry={(entry) => {
                 setEntryToEdit(entry);
                 setIsEntryModalOpen(true);
@@ -637,11 +654,21 @@ export default function App() {
               holidays={holidays}
               projects={projects}
               employees={employees}
+              activeEmployeeFilter={activeEmployeeFilter}
+              focusedDate={focusedMatrixDate}
+              onSelectDate={(d) => setFocusedMatrixDate(d)}
+              onNavigateToEntries={handleNavigateToEntries}
               onOpenDailyEntryModal={(date) => {
                 setPrefillDate(date);
                 setEntryToEdit(null);
                 setIsEntryModalOpen(true);
               }}
+              onEditEntry={(entry) => {
+                setEntryToEdit(entry);
+                setIsEntryModalOpen(true);
+              }}
+              onDeleteEntry={handleDeleteEntry}
+              onDuplicateEntry={handleDuplicateEntry}
               onExportExcel={handleExportExcel}
               onOpenImportModal={() => setIsExcelImportModalOpen(true)}
               onClearDefaultData={handleClearDefaultData}

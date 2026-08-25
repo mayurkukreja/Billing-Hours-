@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { BillingEntry, Employee, FilterState, Project } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { BillingEntry, Employee, Holiday, Project } from '../types';
 import {
   calculateUtilization,
   formatDateDisplay,
@@ -10,14 +10,12 @@ import {
   minutesToReadable,
 } from '../utils/timeCalculations';
 import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
   Calendar,
   Copy,
   Edit2,
+  ExternalLink,
   FileSpreadsheet,
-  Filter,
+  Flame,
   Layers,
   Plus,
   RotateCcw,
@@ -29,7 +27,9 @@ interface DailyEntriesTableProps {
   entries: BillingEntry[];
   employees: Employee[];
   projects: Project[];
+  holidays?: Holiday[];
   currency: string;
+  focusedDate?: string | null;
   onAddNewEntry: () => void;
   onOpenBatchModal: () => void;
   onEditEntry: (entry: BillingEntry) => void;
@@ -40,13 +40,16 @@ interface DailyEntriesTableProps {
   onExportCSV: () => void;
   onExportExcel?: () => void;
   onOpenImportModal?: () => void;
+  onNavigateToHeatmap?: (date?: string) => void;
 }
 
 export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
   entries,
   employees,
   projects,
+  holidays = [],
   currency,
+  focusedDate,
   onAddNewEntry,
   onOpenBatchModal,
   onEditEntry,
@@ -57,6 +60,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
   onExportCSV,
   onExportExcel,
   onOpenImportModal,
+  onNavigateToHeatmap,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('all');
@@ -68,11 +72,100 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedHeatmapDate, setSelectedHeatmapDate] = useState<string | null>(focusedDate || null);
+  const [showHeatmapRibbon, setShowHeatmapRibbon] = useState(true);
+
+  // Sync if focusedDate changes
+  useEffect(() => {
+    if (focusedDate) {
+      setSelectedHeatmapDate(focusedDate);
+    }
+  }, [focusedDate]);
+
+  // Aggregate day map for mini heatmap ribbon
+  const dayDataMap = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        billable: number;
+        totalWorking: number;
+        entriesCount: number;
+      }
+    >();
+
+    entries.forEach((e) => {
+      const existing = map.get(e.date) || {
+        billable: 0,
+        totalWorking: 0,
+        entriesCount: 0,
+      };
+
+      existing.billable += e.billableMinutes;
+      existing.totalWorking += e.billableMinutes + e.nonBillableMinutes + e.upskillingMinutes;
+      existing.entriesCount += 1;
+
+      map.set(e.date, existing);
+    });
+
+    return map;
+  }, [entries]);
+
+  // Generate rolling 16-week matrix ribbon (112 days) ending at latest date or today
+  const ribbonWeeks = useMemo(() => {
+    const today = new Date();
+    // End on Sunday of current week
+    const currentDayOfWeek = today.getDay(); // 0 = Sun
+    const daysUntilSunday = currentDayOfWeek === 0 ? 0 : 7 - currentDayOfWeek;
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + daysUntilSunday);
+
+    // 16 weeks prior
+    const numWeeks = 16;
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - numWeeks * 7 + 1);
+
+    const weeks: { dateStr: string; dayOfWeek: number; dayNum: number; monthName: string }[][] = [];
+    let cur = new Date(startDate);
+    let currentWeek: { dateStr: string; dayOfWeek: number; dayNum: number; monthName: string }[] = [];
+
+    const monthNamesShort = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    for (let i = 0; i < numWeeks * 7; i++) {
+      const y = cur.getFullYear();
+      const m = (cur.getMonth() + 1).toString().padStart(2, '0');
+      const d = cur.getDate().toString().padStart(2, '0');
+      const dStr = `${y}-${m}-${d}`;
+
+      currentWeek.push({
+        dateStr: dStr,
+        dayOfWeek: cur.getDay(),
+        dayNum: cur.getDate(),
+        monthName: monthNamesShort[cur.getMonth()],
+      });
+
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
+
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    return weeks;
+  }, []);
 
   // Filter and Sort Logic
   const filteredEntries = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
     return entries
       .filter((entry) => {
+        // Direct Heatmap Date Filter (Highest Priority)
+        if (selectedHeatmapDate && entry.date !== selectedHeatmapDate) {
+          return false;
+        }
+
         // Search
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase();
@@ -104,10 +197,20 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
         if (selectedBillingType === 'upskilling' && entry.upskillingMinutes <= 0) return false;
         if (selectedBillingType === 'leave' && entry.leaveMinutes <= 0) return false;
 
-        // Custom Date Filter
-        if (dateFilterPreset === 'custom') {
-          if (customDateFrom && entry.date < customDateFrom) return false;
-          if (customDateTo && entry.date > customDateTo) return false;
+        // Date Presets
+        if (!selectedHeatmapDate) {
+          if (dateFilterPreset === 'month') {
+            const currentYearMonth = todayStr.slice(0, 7);
+            if (!entry.date.startsWith(currentYearMonth)) return false;
+          } else if (dateFilterPreset === 'week') {
+            const entryD = new Date(entry.date);
+            const diffTime = Math.abs(now.getTime() - entryD.getTime());
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (diffDays > 7) return false;
+          } else if (dateFilterPreset === 'custom') {
+            if (customDateFrom && entry.date < customDateFrom) return false;
+            if (customDateTo && entry.date > customDateTo) return false;
+          }
         }
 
         return true;
@@ -135,6 +238,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
       });
   }, [
     entries,
+    selectedHeatmapDate,
     searchQuery,
     selectedProjectId,
     selectedEmployeeId,
@@ -160,7 +264,6 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
   };
-
 
   // Aggregate column totals
   const totals = useMemo(() => {
@@ -195,30 +298,61 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
     setSelectedProjectId('all');
     setSelectedEmployeeId('all');
     setSelectedBillingType('all');
+    setSelectedStatusFilter('all');
     setDateFilterPreset('all');
     setCustomDateFrom('');
     setCustomDateTo('');
+    setSelectedHeatmapDate(null);
     setSortBy('date-desc');
   };
 
   const hasActiveFilters =
+    selectedHeatmapDate !== null ||
     searchQuery !== '' ||
     selectedProjectId !== 'all' ||
     selectedEmployeeId !== 'all' ||
+    selectedStatusFilter !== 'all' ||
     selectedBillingType !== 'all' ||
     dateFilterPreset !== 'all' ||
     customDateFrom !== '' ||
     customDateTo !== '';
 
+  const getMiniCellClass = (dateStr: string) => {
+    const data = dayDataMap.get(dateStr);
+    const isSelected = selectedHeatmapDate === dateStr;
+
+    if (!data || data.totalWorking === 0) {
+      return isSelected
+        ? 'bg-slate-200 dark:bg-slate-700 border-blue-500 ring-2 ring-blue-500'
+        : 'bg-slate-100 dark:bg-slate-800/60 border-slate-200/60 dark:border-slate-800 hover:border-slate-400';
+    }
+
+    const hours = data.totalWorking / 60;
+    let baseColor = 'bg-blue-200 dark:bg-blue-900/80 border-blue-300 dark:border-blue-700';
+    if (hours > 9) {
+      baseColor = 'bg-indigo-600 dark:bg-indigo-500 border-indigo-700 text-white';
+    } else if (hours >= 7.5) {
+      baseColor = 'bg-blue-600 dark:bg-blue-500 border-blue-700 text-white';
+    } else if (hours >= 4) {
+      baseColor = 'bg-blue-400 dark:bg-blue-600 border-blue-500 text-white';
+    }
+
+    if (isSelected) {
+      return `${baseColor} ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900 scale-125 z-10 font-bold shadow-xs`;
+    }
+
+    return `${baseColor} hover:scale-120`;
+  };
+
   return (
-    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden space-y-0">
       {/* Header & Controls */}
       <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-slate-800 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h3 className="text-lg font-black tracking-tight text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Layers className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              Daily Billing Entries
+              Daily Billing Entries & Activity Matrix
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold">
               Showing {filteredEntries.length} of {entries.length} recorded entries
@@ -226,12 +360,26 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowHeatmapRibbon((prev) => !prev)}
+              className={`px-3 py-2 text-xs font-bold tracking-tight rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer ${
+                showHeatmapRibbon
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+              }`}
+              title="Toggle Interactive Heatmap Matrix Ribbon"
+            >
+              <Flame className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>{showHeatmapRibbon ? 'Hide Heatmap Ribbon' : 'Show Heatmap Ribbon'}</span>
+            </button>
+
             {onOpenImportModal && (
               <button
                 id="import-excel-table-btn"
                 type="button"
                 onClick={onOpenImportModal}
-                className="px-3 py-2 text-xs font-bold tracking-tight text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-xl transition-colors flex items-center gap-1.5"
+                className="px-3 py-2 text-xs font-bold tracking-tight text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                 title="Import Excel (.xlsx) or CSV spreadsheet"
               >
                 <FileSpreadsheet className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
@@ -244,7 +392,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                 id="export-excel-table-btn"
                 type="button"
                 onClick={onExportExcel}
-                className="px-3 py-2 text-xs font-bold tracking-tight text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5"
+                className="px-3 py-2 text-xs font-bold tracking-tight text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                 title="Download multi-sheet Excel (.xlsx) report"
               >
                 <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -255,7 +403,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
             <button
               id="batch-log-btn"
               onClick={onOpenBatchModal}
-              className="px-3 py-2 text-xs font-bold tracking-tight text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center gap-1.5"
+              className="px-3 py-2 text-xs font-bold tracking-tight text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Generate batch logs for multiple dates"
             >
               <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
@@ -265,7 +413,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
             <button
               id="export-csv-btn"
               onClick={onExportCSV}
-              className="px-3 py-2 text-xs font-bold tracking-tight text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center gap-1.5"
+              className="px-3 py-2 text-xs font-bold tracking-tight text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
               title="Download CSV report"
             >
               <span>CSV</span>
@@ -274,13 +422,120 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
             <button
               id="add-entry-table-btn"
               onClick={onAddNewEntry}
-              className="px-4 py-2 text-xs font-black tracking-tight text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 text-xs font-black tracking-tight text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
               <span>Add Entry</span>
             </button>
           </div>
         </div>
+
+        {/* INTERACTIVE MINI HEATMAP MATRIX RIBBON */}
+        {showHeatmapRibbon && (
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 border border-slate-200/80 dark:border-slate-700/80 rounded-2xl space-y-2.5 animate-in fade-in duration-150">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Flame className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Activity Heatmap Matrix Ribbon (16 Weeks)</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-semibold">
+                  Click any day to filter table to that date
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {onNavigateToHeatmap && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToHeatmap(selectedHeatmapDate || undefined)}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>Open Full 365-Day Heatmap</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Matrix Columns */}
+            <div className="overflow-x-auto pb-1">
+              <div className="min-w-[640px] flex items-center gap-[3px]">
+                {/* Day Labels */}
+                <div className="flex flex-col justify-between pr-1.5 text-[9px] font-bold text-slate-400 h-[72px]">
+                  <span>M</span>
+                  <span>W</span>
+                  <span>F</span>
+                  <span>S</span>
+                </div>
+
+                {/* 16 Week columns */}
+                {ribbonWeeks.map((week, wIdx) => (
+                  <div key={wIdx} className="flex flex-col gap-[3px]">
+                    {[1, 2, 3, 4, 5, 6, 0].map((dayTarget) => {
+                      const dayObj = week.find((d) => d.dayOfWeek === dayTarget);
+                      if (!dayObj) return <div key={dayTarget} className="w-2.5 h-2.5" />;
+
+                      const cellClass = getMiniCellClass(dayObj.dateStr);
+                      const data = dayDataMap.get(dayObj.dateStr);
+
+                      return (
+                        <button
+                          key={dayObj.dateStr}
+                          type="button"
+                          onClick={() => {
+                            if (selectedHeatmapDate === dayObj.dateStr) {
+                              setSelectedHeatmapDate(null);
+                            } else {
+                              setSelectedHeatmapDate(dayObj.dateStr);
+                            }
+                          }}
+                          className={`w-2.5 h-2.5 rounded-xs border transition-all cursor-pointer ${cellClass}`}
+                          title={`${dayObj.dateStr}: ${data ? minutesToReadable(data.billable) : '0h'} (${data?.entriesCount || 0} entries)`}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Active Matrix Date Banner */}
+            {selectedHeatmapDate && (
+              <div className="pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 font-bold font-mono-nums flex items-center gap-1">
+                    <Flame className="w-3 h-3 text-blue-600" />
+                    <span>Matrix Filter: {formatDateDisplay(selectedHeatmapDate)}</span>
+                  </span>
+                  <span className="text-slate-500 font-medium">
+                    Showing entries for this specific day ({filteredEntries.length} logged)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHeatmapDate(null)}
+                    className="px-2.5 py-1 text-xs font-bold text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors cursor-pointer"
+                  >
+                    ✕ Clear Date Filter
+                  </button>
+                  {onNavigateToHeatmap && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToHeatmap(selectedHeatmapDate)}
+                      className="px-2.5 py-1 text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 border border-blue-200 dark:border-blue-800 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>Focus in Full Heatmap</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Bulk Actions Floating Bar (if items selected) */}
         {selectedIds.length > 0 && (
@@ -301,7 +556,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                       onBulkUpdateStatus(selectedIds, 'approved');
                       setSelectedIds([]);
                     }}
-                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs"
+                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs cursor-pointer"
                   >
                     Mark Approved
                   </button>
@@ -311,7 +566,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                       onBulkUpdateStatus(selectedIds, 'invoiced');
                       setSelectedIds([]);
                     }}
-                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs"
+                    className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs cursor-pointer"
                   >
                     Mark Invoiced
                   </button>
@@ -326,7 +581,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                       setSelectedIds([]);
                     }
                   }}
-                  className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs flex items-center gap-1"
+                  className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-lg transition-colors shadow-2xs flex items-center gap-1 cursor-pointer"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete Selected
                 </button>
@@ -334,7 +589,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
               <button
                 type="button"
                 onClick={() => setSelectedIds([])}
-                className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-bold"
+                className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-bold cursor-pointer"
               >
                 Deselect All
               </button>
@@ -358,7 +613,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-2.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="absolute right-2.5 top-2.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 ✕
               </button>
@@ -423,7 +678,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg">
               <button
                 onClick={() => setSortBy('date-desc')}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                   sortBy === 'date-desc'
                     ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -433,7 +688,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
               </button>
               <button
                 onClick={() => setSortBy('date-asc')}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                   sortBy === 'date-asc'
                     ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -443,7 +698,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
               </button>
               <button
                 onClick={() => setSortBy('hours-desc')}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                   sortBy === 'hours-desc'
                     ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -453,7 +708,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
               </button>
               <button
                 onClick={() => setSortBy('util-desc')}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
                   sortBy === 'util-desc'
                     ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-2xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -467,10 +722,10 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
           {hasActiveFilters && (
             <button
               onClick={resetFilters}
-              className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+              className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
             >
               <RotateCcw className="w-3 h-3" />
-              Reset filters
+              <span>Reset all filters</span>
             </button>
           )}
         </div>
@@ -490,7 +745,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                   title="Select all entries"
                 />
               </th>
-              <th className="py-3.5 px-3">Date</th>
+              <th className="py-3.5 px-3">Date & Matrix</th>
               <th className="py-3.5 px-4">Project</th>
               <th className="py-3.5 px-3 text-center">Status</th>
               <th className="py-3.5 px-3 text-right">Billable</th>
@@ -521,14 +776,14 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                         {entries.length === 0
                           ? 'Get started by adding your first daily working entry.'
-                          : 'Try adjusting your search query or filter criteria.'}
+                          : 'Try adjusting your search query, matrix date filter, or filter criteria.'}
                       </p>
                     </div>
                     {entries.length === 0 ? (
                       <button
                         id="empty-state-add-btn"
                         onClick={onAddNewEntry}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
                       >
                         <Plus className="w-4 h-4" />
                         <span>Add your first daily entry</span>
@@ -536,7 +791,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                     ) : (
                       <button
                         onClick={resetFilters}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg transition-colors"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs rounded-lg transition-colors cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Clear All Filters</span>
@@ -582,10 +837,22 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                       />
                     </td>
 
-                    {/* Date */}
+                    {/* Date with Matrix Tag */}
                     <td className="py-3 px-3 whitespace-nowrap">
-                      <div className="font-bold text-slate-900 dark:text-slate-100 font-mono-nums">
-                        {formatDateDisplay(entry.date)}
+                      <div className="flex items-center gap-1.5">
+                        <div className="font-bold text-slate-900 dark:text-slate-100 font-mono-nums">
+                          {formatDateDisplay(entry.date)}
+                        </div>
+                        {onNavigateToHeatmap && (
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToHeatmap(entry.date)}
+                            className="p-0.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded transition-colors cursor-pointer"
+                            title={`Inspect ${entry.date} in Heatmap Matrix`}
+                          >
+                            <Flame className="w-3 h-3 text-blue-500" />
+                          </button>
+                        )}
                       </div>
                       <div className="text-[10px] text-slate-400 font-semibold">
                         {entry.employeeName}
@@ -599,20 +866,18 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                           className="w-2.5 h-2.5 rounded-full shrink-0"
                           style={{ backgroundColor: projectObj?.color || '#0284c7' }}
                         />
-                        <span className="font-bold text-slate-900 dark:text-slate-100 truncate max-w-[160px]">
+                        <span className="font-bold text-slate-900 dark:text-slate-100">
                           {entry.projectName}
                         </span>
                       </div>
-                      {projectObj?.code && (
-                        <span className="text-[10px] text-slate-400 font-mono pl-4.5">
-                          {projectObj.code}
-                        </span>
-                      )}
+                      <div className="text-[10px] text-slate-400 font-semibold">
+                        {projectObj?.client || 'Internal Project'}
+                      </div>
                     </td>
 
-                    {/* Status Pill */}
+                    {/* Status */}
                     <td className="py-3 px-3 text-center whitespace-nowrap">
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border ${statusStyles}`}>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border capitalize ${statusStyles}`}>
                         {status}
                       </span>
                     </td>
@@ -631,7 +896,7 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
 
                     {/* Upskilling */}
                     <td className="py-3 px-3 text-right whitespace-nowrap font-mono-nums">
-                      <span className={entry.upskillingMinutes > 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-400'}>
+                      <span className={entry.upskillingMinutes > 0 ? 'text-amber-600 dark:text-amber-400 font-bold' : 'text-slate-400'}>
                         {minutesToHHMM(entry.upskillingMinutes)}
                       </span>
                     </td>
@@ -669,23 +934,36 @@ export const DailyEntriesTable: React.FC<DailyEntriesTableProps> = ({
                     {/* Actions */}
                     <td className="py-3 px-3 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1">
+                        {onNavigateToHeatmap && (
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToHeatmap(entry.date)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                            title="Focus in Heatmap Matrix"
+                          >
+                            <Flame className="w-3.5 h-3.5 text-blue-500" />
+                          </button>
+                        )}
                         <button
+                          type="button"
                           onClick={() => onDuplicateEntry(entry)}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                           title="Duplicate entry"
                         >
                           <Copy className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => onEditEntry(entry)}
-                          className="p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                           title="Edit entry"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button
+                          type="button"
                           onClick={() => onDeleteEntry(entry)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
                           title="Delete entry"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
