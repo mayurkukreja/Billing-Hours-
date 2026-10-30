@@ -2,7 +2,7 @@ export type ProductivityRating = 'Low' | 'Moderate' | 'Good' | 'Excellent';
 
 export type WorkingDaysPreset = 'mon-fri' | 'mon-sat' | 'custom';
 
-export type ActiveTab = 'dashboard' | 'entries' | 'heatmap' | 'analytics' | 'weekly' | 'monthly' | 'reports' | 'settings';
+export type ActiveTab = 'dashboard' | 'entries' | 'heatmap' | 'training' | 'analytics' | 'weekly' | 'monthly' | 'reports' | 'settings';
 
 export type TimeFormat = 'HH:MM' | 'decimal';
 
@@ -105,5 +105,61 @@ export interface DaySummary {
   utilizationPercent: number;
   entriesCount: number;
   estimatedRevenue?: number;
+}
+
+export type TrainingStatus = 'planned' | 'in-progress' | 'under-review' | 'completed';
+
+export interface AssignedWorkItem {
+  id: string;
+  title: string;
+  description?: string;
+  assignedTo?: string; // e.g. name of trainee or engineer
+  dueDate?: string; // YYYY-MM-DD
+  status: 'pending' | 'in-progress' | 'completed';
+  priority?: 'low' | 'medium' | 'high';
+  estimatedHours?: number;
+  completedAt?: string;
+}
+
+export interface TrainingComment {
+  id: string;
+  author: string; // e.g. 'Sarah Chen (Mentor)' or 'Mayur'
+  authorRole: 'trainer' | 'trainee' | 'reviewer' | 'manager';
+  date: string; // YYYY-MM-DD or ISO
+  content: string;
+}
+
+export interface TrainingRecord {
+  id: string;
+  title: string;
+  category: string; // e.g. 'Aeronautical Certification', 'CAD / FEA Structural', 'DO-178C / DO-254', 'Flammability & Materials', 'Quality Assurance', 'Systems Engineering'
+  employeeId: string; // Trainee ID
+  employeeName: string; // Trainee Name
+  mentorOrTrainer: string; // "The Other" (Trainer, Mentor, Reviewer, or Senior Engineer)
+  mentorEmployeeId?: string; // Optional reference if in employees list
+  startDate: string; // YYYY-MM-DD
+  completionDate?: string; // YYYY-MM-DD
+  daysTaken: number; // Number of days taken
+  traineeMinutes: number; // Trainee time spent (stored in minutes)
+  otherTimeMinutes: number; // "Time taken by the other" (stored in minutes, e.g. mentor/reviewer guidance hours)
+  status: TrainingStatus;
+  progressPercent: number; // 0 - 100
+  comments: TrainingComment[]; // Comments & feedback thread
+  assignedWork: AssignedWorkItem[]; // More assigned work / tasks
+  learningObjectives?: string;
+  certificationEarned?: string;
+  deliverables?: string;
+  syncWithTimesheet?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TrainingFilterState {
+  searchQuery: string;
+  employeeId: string;
+  mentorOrTrainer: string;
+  category: string;
+  status: 'all' | TrainingStatus;
+  sortBy: 'date-desc' | 'date-asc' | 'days-desc' | 'progress-desc' | 'other-time-desc';
 }
 

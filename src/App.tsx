@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ActiveTab, AppSettings, BillingEntry, Employee, Holiday, Project } from './types';
+import { ActiveTab, AppSettings, BillingEntry, Employee, Holiday, Project, TrainingRecord } from './types';
 import {
   clearAllStorageData,
   DEFAULT_EMPLOYEES,
   DEFAULT_HOLIDAYS,
   DEFAULT_PROJECTS,
   DEFAULT_SETTINGS,
+  DEFAULT_TRAININGS,
   initializeStorage,
   SAMPLE_AEROSPACE_ENTRIES,
   saveEmployees,
@@ -13,6 +14,7 @@ import {
   saveHolidays,
   saveProjects,
   saveSettings,
+  saveTrainings,
 } from './utils/storage';
 import { exportToCSV, exportToJSON, parseImportJSON } from './utils/exportHelpers';
 import { exportToExcel } from './utils/excelHelpers';
@@ -23,6 +25,7 @@ import { Navbar } from './components/Navbar';
 import { DashboardCards } from './components/DashboardCards';
 import { DailyEntriesTable } from './components/DailyEntriesTable';
 import { ActivityHeatmap } from './components/ActivityHeatmap';
+import { TrainingView } from './components/TrainingView';
 import { WeeklySummary } from './components/WeeklySummary';
 import { MonthlySummary } from './components/MonthlySummary';
 import { SettingsView } from './components/SettingsView';
@@ -47,11 +50,12 @@ export default function App() {
   const [projects, setProjects] = useState<Project[]>(initialData.projects);
   const [holidays, setHolidays] = useState<Holiday[]>(initialData.holidays);
   const [settings, setSettings] = useState<AppSettings>(initialData.settings);
+  const [trainings, setTrainings] = useState<TrainingRecord[]>(initialData.trainings);
 
   // Active View Tab (with URL Hash sync for 100% static GitHub Pages support)
   const getInitialTab = (): ActiveTab => {
     const hash = window.location.hash.replace('#', '') as ActiveTab;
-    if (['dashboard', 'entries', 'heatmap', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
+    if (['dashboard', 'entries', 'heatmap', 'training', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
       return hash;
     }
     return 'dashboard';
@@ -120,7 +124,7 @@ export default function App() {
   useEffect(() => {
     const handleHashChange = () => {
       const hash = window.location.hash.replace('#', '') as ActiveTab;
-      if (['dashboard', 'entries', 'heatmap', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
+      if (['dashboard', 'entries', 'heatmap', 'training', 'analytics', 'weekly', 'monthly', 'reports', 'settings'].includes(hash)) {
         setActiveTab(hash);
       }
     };
@@ -161,6 +165,10 @@ export default function App() {
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    saveTrainings(trainings);
+  }, [trainings]);
 
   // Filter entries by active global employee switcher if not "all"
   const employeeFilteredEntries = useMemo(() => {
@@ -381,6 +389,59 @@ export default function App() {
     showToast('Holiday removed');
   };
 
+  // Training Handlers
+  const handleSaveTraining = (record: TrainingRecord) => {
+    setTrainings((prev) => {
+      const exists = prev.some((t) => t.id === record.id);
+      if (exists) {
+        showToast(`Training "${record.title}" updated`);
+        return prev.map((t) => (t.id === record.id ? record : t));
+      } else {
+        showToast(`Created training "${record.title}"`);
+        return [record, ...prev];
+      }
+    });
+  };
+
+  const handleDeleteTraining = (id: string) => {
+    const target = trainings.find((t) => t.id === id);
+    setTrainings((prev) => prev.filter((t) => t.id !== id));
+    showToast(`Deleted training "${target?.title || 'record'}"`);
+  };
+
+  const handleLogTrainingToTimesheet = (training: TrainingRecord) => {
+    let trainingProj = projects.find(
+      (p) => p.name.toLowerCase().includes('training') || p.id === 'proj-tr'
+    );
+    if (!trainingProj) {
+      trainingProj = projects[0];
+    }
+    const today = getTodayDateString();
+    const upskillingMins = Math.min(540, training.traineeMinutes > 0 ? Math.min(240, training.traineeMinutes) : 120);
+
+    const newEntry: BillingEntry = {
+      id: `entry-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      date: training.completionDate && training.completionDate <= today ? training.completionDate : today,
+      employeeId: training.employeeId,
+      employeeName: training.employeeName,
+      projectId: trainingProj ? trainingProj.id : 'proj-tr',
+      projectName: trainingProj ? trainingProj.name : 'Training',
+      billableMinutes: 0,
+      nonBillableMinutes: 60,
+      upskillingMinutes: upskillingMins,
+      leaveMinutes: 0,
+      remarks: `Training: ${training.title} | Mentor: ${training.mentorOrTrainer} (${training.daysTaken} days taken, ${minutesToHHMM(training.otherTimeMinutes)} by mentor)`,
+      taskCategory: 'Training & Skill Development',
+      status: 'submitted',
+      hourlyRate: trainingProj?.hourlyRate || settings.defaultHourlyRate,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setEntries((prev) => [newEntry, ...prev]);
+    showToast(`Logged ${minutesToHHMM(upskillingMins)} upskilling training time to Daily Entries!`);
+  };
+
   // Export JSON
   const handleExportJSON = () => {
     exportToJSON(entries, employees, projects, holidays, settings);
@@ -527,6 +588,8 @@ export default function App() {
         setProjects(DEFAULT_PROJECTS);
         setHolidays(DEFAULT_HOLIDAYS);
         setSettings(DEFAULT_SETTINGS);
+        setTrainings(DEFAULT_TRAININGS);
+        saveTrainings(DEFAULT_TRAININGS);
         setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
         showToast('Sample aerospace dataset loaded');
       },
@@ -547,6 +610,7 @@ export default function App() {
         setProjects(DEFAULT_PROJECTS);
         setHolidays([]);
         setSettings(DEFAULT_SETTINGS);
+        setTrainings([]);
         setConfirmModalConfig((prev) => ({ ...prev, isOpen: false }));
         showToast('LocalStorage cleared completely');
       },
@@ -589,6 +653,7 @@ export default function App() {
               periodLabel="Executive Monthly Overview"
               targetMinutesForPeriod={currentMonthCalc.monthlyTargetMinutes}
               onQuickAddToday={handleQuickAddToday}
+              onNavigateToTraining={() => handleTabChange('training')}
             />
 
             {/* Quick table of recent logs directly below dashboard */}
@@ -672,6 +737,21 @@ export default function App() {
               onExportExcel={handleExportExcel}
               onOpenImportModal={() => setIsExcelImportModalOpen(true)}
               onClearDefaultData={handleClearDefaultData}
+            />
+          </div>
+        )}
+
+        {/* Tab 2.8: Training & Skill Development */}
+        {activeTab === 'training' && (
+          <div className="animate-in fade-in duration-200">
+            <TrainingView
+              trainings={trainings}
+              employees={employees}
+              projects={projects}
+              activeEmployeeFilter={activeEmployeeFilter}
+              onSaveTraining={handleSaveTraining}
+              onDeleteTraining={handleDeleteTraining}
+              onLogToTimesheet={handleLogTrainingToTimesheet}
             />
           </div>
         )}

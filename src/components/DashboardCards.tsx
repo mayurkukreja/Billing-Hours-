@@ -28,6 +28,7 @@ interface DashboardCardsProps {
   periodLabel: string;
   targetMinutesForPeriod: number;
   onQuickAddToday: () => void;
+  onNavigateToTraining?: () => void;
 }
 
 export const DashboardCards: React.FC<DashboardCardsProps> = ({
@@ -36,6 +37,7 @@ export const DashboardCards: React.FC<DashboardCardsProps> = ({
   periodLabel,
   targetMinutesForPeriod,
   onQuickAddToday,
+  onNavigateToTraining,
 }) => {
   // Aggregate minutes
   const totalBillableMinutes = entries.reduce((sum, e) => sum + (e.billableMinutes || 0), 0);
@@ -172,7 +174,10 @@ export const DashboardCards: React.FC<DashboardCardsProps> = ({
         {/* 4. Upskilling Hours */}
         <div
           id="metric-upskilling-hours"
-          className="p-5 bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/40 rounded-2xl shadow-2xs hover:border-amber-400 dark:hover:border-amber-700 transition-colors relative overflow-hidden group"
+          onClick={onNavigateToTraining}
+          className={`p-5 bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-900/40 rounded-2xl shadow-2xs hover:border-amber-400 dark:hover:border-amber-700 transition-colors relative overflow-hidden group ${
+            onNavigateToTraining ? 'cursor-pointer hover:shadow-md' : ''
+          }`}
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
@@ -186,10 +191,17 @@ export const DashboardCards: React.FC<DashboardCardsProps> = ({
             <div className="text-3xl sm:text-4xl font-black font-mono-nums text-amber-950 dark:text-amber-200 tracking-tighter">
               {minutesToHHMM(totalUpskillingMinutes)}
             </div>
-            <div className="text-xs font-semibold text-amber-600/80 dark:text-amber-400/80 mt-1 flex items-center gap-1.5">
-              <span>{minutesToReadable(totalUpskillingMinutes)}</span>
-              <span className="text-amber-300 dark:text-amber-800">•</span>
-              <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">Learning & Seminars</span>
+            <div className="text-xs font-semibold text-amber-600/80 dark:text-amber-400/80 mt-1 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <span>{minutesToReadable(totalUpskillingMinutes)}</span>
+                <span className="text-amber-300 dark:text-amber-800">•</span>
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">Training & Seminars</span>
+              </div>
+              {onNavigateToTraining && (
+                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 group-hover:underline">
+                  View Section →
+                </span>
+              )}
             </div>
           </div>
           <div className="absolute bottom-0 left-0 right-0 h-1 bg-amber-500" />
